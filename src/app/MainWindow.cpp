@@ -25,6 +25,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QTextEdit>
+#include <QTextCursor>
 #include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -235,9 +236,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         connect(controller_, &TranslationController::statusChanged,
                 this, &MainWindow::updateStatus);
         connect(controller_, &TranslationController::partialTranslation,
-                translatedText_, &QTextEdit::setPlainText);
+                this, [this](const QString &text) {
+                    translatedText_->setPlainText(text);
+                    translatedText_->moveCursor(QTextCursor::End);
+                    translatedText_->ensureCursorVisible();
+                });
         connect(controller_, &TranslationController::explanationReady,
-                explanationText_, &QTextEdit::setPlainText);
+                this, [this](const QString &text) {
+                    explanationText_->setPlainText(text);
+                    explanationText_->moveCursor(QTextCursor::End);
+                    explanationText_->ensureCursorVisible();
+                });
     } else {
         status_->setText("Translation disabled: sandbox verification failed");
     }

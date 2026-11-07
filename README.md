@@ -18,7 +18,7 @@ directory structure is preserved by `model/.gitkeep`; copy exactly one local
 `.gguf` file there before configuring CMake:
 
 ```sh
-cp /path/to/translategemma-12b-it.Q4_K_M.gguf model/
+cp /path/to/translategemma-4b-it.Q4_K_M.gguf model/
 ```
 
 `llama.cpp` is pinned to commit
@@ -124,7 +124,7 @@ generated-token batches use explicit positions, sequence IDs, and logits.
 Place exactly one GGUF model in the project `model/` folder:
 
 ```sh
-cp /path/to/translategemma-12b-it.Q4_K_M.gguf model/
+cp /path/to/translategemma-4b-it.Q4_K_M.gguf model/
 cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/homebrew
 cmake --build build
 ```
@@ -181,7 +181,7 @@ independent, trusted source:
 {
   "models": [
     {
-      "file": "translategemma-12b-it.Q4_K_M.gguf",
+      "file": "translategemma-4b-it.Q4_K_M.gguf",
       "sha256": "trusted-lowercase-sha256"
     }
   ]
@@ -191,12 +191,12 @@ independent, trusted source:
 `models/approved-models.example.json` is only a schema example. Its placeholder
 hash is intentionally rejected. The application rejects missing files,
 unknown file names, and every hash that is not present in the manifest.
-The configured model is TranslateGemma 12B Q4_K_M. Replacing it with another
+The configured model is TranslateGemma 4B Q4_K_M. Replacing it with another
 model requires a separately approved manifest entry and a rebuild.
 
-The current manifest authorizes the configured TranslateGemma 12B file with
+The current manifest authorizes the configured TranslateGemma 4B file with
 SHA-256
-`f1903507af56f520d329c4ba1474abcf460b10b9c285c20ce506f59b30e9ae63`.
+`81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330`.
 The hash was verified locally before loading. The model file itself is not
 stored in this repository.
 

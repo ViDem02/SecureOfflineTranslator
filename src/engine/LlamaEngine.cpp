@@ -8,9 +8,34 @@
 #include <QVector>
 
 namespace {
+bool hasRepeatedSuffix(const QString &text) {
+    const int maximum = std::min(240, static_cast<int>(text.size() / 3));
+    for (int length = 24; length <= maximum; ++length) {
+        const auto suffix = text.right(length);
+        if (text.endsWith(suffix + suffix + suffix)) return true;
+    }
+    return false;
+}
+
 QString makePrompt(const llama_model *model, const QString &source,
                    const QString &sourceLanguage, const QString &targetLanguage,
-                   const QString &glossary, bool includeExplanation) {
+                   const QString &glossary, bool includeExplanation,
+                   bool continuation) {
+    if (continuation) {
+                       return QString("\n<end_of_turn>\n<start_of_turn>user\n"
+                                      "Continue translating from %1 to %2. Translate only this next "
+                                      "source part. Do not add information, commentary, or another "
+                                      "paragraph after the translation. Preserve the established "
+                                      "terminology and formatting. Technical data must not be "
+                                      "altered: reproduce it verbatim. This includes numbers, "
+                                      "decimal separators, units, tolerances, dates, times, "
+                                      "identifiers, standards, model names, formulas, and symbols. "
+                                      "If you are unsure whether technical data can be translated "
+                                      "or reformatted, leave it in English and preserve it "
+                                      "verbatim:\n%3\n"
+                                      "<end_of_turn>\n<start_of_turn>model\n")
+                           .arg(sourceLanguage, targetLanguage, source);
+    }
     const auto outputInstruction = includeExplanation
         ? QStringLiteral(" After the translation, add a section exactly named "
                          "EXPLANATION: and briefly explain the main translation choices.")
@@ -23,7 +48,12 @@ QString makePrompt(const llama_model *model, const QString &source,
         return QString("You are a professional translator. Translate the text below "
                        "from %1 to %2. Do not repeat the source text, explain your work, "
                        "or add commentary. Return only the translation. Preserve numbers, "
-                       "units, symbols, identifiers, formatting, and line breaks.%3%4\n\n"
+                       "units, symbols, identifiers, formatting, and line breaks. Technical "
+                       "data must not be altered: reproduce it verbatim. This includes numbers, "
+                       "decimal separators, units, tolerances, dates, times, identifiers, "
+                       "standards, model names, formulas, and symbols. If you are unsure "
+                       "whether technical data can be translated or reformatted, leave it in "
+                       "English and preserve it verbatim.%3%4\n\n"
                        "SOURCE TEXT:\n%5\n\nTRANSLATION:")
             .arg(sourceLanguage, targetLanguage, glossaryInstruction, outputInstruction, source);
     }
@@ -31,7 +61,12 @@ QString makePrompt(const llama_model *model, const QString &source,
         QStringLiteral("You are a professional translator. Translate the user's text "
                        "faithfully. Never repeat the source text, explain your work, or add "
                        "commentary. Return only the translation. Preserve numbers, units, "
-                       "symbols, identifiers, formatting, and line breaks.")
+                       "symbols, identifiers, formatting, and line breaks. Technical data "
+                       "must not be altered: reproduce it verbatim. This includes numbers, "
+                       "decimal separators, units, tolerances, dates, times, identifiers, "
+                       "standards, model names, formulas, and symbols. If you are unsure "
+                       "whether technical data can be translated or reformatted, leave it in "
+                       "English and preserve it verbatim.")
                        + outputInstruction + glossaryInstruction;
     const QByteArray system = systemText.toUtf8();
     const QByteArray user = QString("Translate the following text from %1 to %2. "
@@ -137,7 +172,7 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
     cancelled_ = false;
     if (!translationActive_ && !beginTranslation(error)) return false;
     const auto prompt = makePrompt(model_, source, sourceLanguage, targetLanguage, glossary,
-                                   includeExplanation);
+                                   includeExplanation, contextPosition_ > 0);
     if (prompt.isEmpty()) {
         if (error) *error = "The model chat template could not be applied";
         return false;
@@ -146,11 +181,11 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
     QByteArray promptBytes = prompt.toUtf8();
     QVector<llama_token> tokens(1024);
     auto tokenCount = llama_tokenize(vocab, promptBytes.constData(), promptBytes.size(),
-                                     tokens.data(), tokens.size(), true, false);
+                                     tokens.data(), tokens.size(), contextPosition_ == 0, false);
     if (tokenCount < 0) {
         tokens.resize(-tokenCount);
         tokenCount = llama_tokenize(vocab, promptBytes.constData(), promptBytes.size(),
-                                    tokens.data(), tokens.size(), true, false);
+                                    tokens.data(), tokens.size(), contextPosition_ == 0, false);
     }
     if (tokenCount <= 0) {
         if (error) *error = "The translation prompt could not be tokenized";
@@ -166,7 +201,7 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
         }
         return false;
     }
-    const auto availableTokens = contextSize - tokenCount - 1;
+    const auto availableTokens = contextSize - contextPosition_ - tokenCount - 1;
     if (availableTokens <= 0) {
         if (error) *error = "Input is too large for the model context";
         return false;
@@ -198,6 +233,8 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
         return false;
     }
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.2f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+        llama_vocab_n_tokens(vocab), 256, 1.15f, 0.0f, 0.0f));
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     auto nextBatch = llama_batch_init(1, 0, 1);
     QByteArray outputBytes;
@@ -205,6 +242,7 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
     const auto maxGeneratedTokens = availableTokens;
     int decodedTokens = 0;
     bool stoppedByEndOfTurn = false;
+    bool stoppedByRepetition = false;
     for (int i = 0; i < maxGeneratedTokens && !cancelled_; ++i) {
         const auto token = llama_sampler_sample(sampler, context_, -1);
         if (llama_vocab_is_eog(vocab, token)) {
@@ -241,6 +279,10 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
                     }
                 } else {
                     onPartial(output);
+                    if (hasRepeatedSuffix(output)) {
+                        stoppedByRepetition = true;
+                        break;
+                    }
                 }
             }
         }
@@ -270,6 +312,12 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
     llama_sampler_free(sampler);
     if (cancelled_) {
         if (error) *error = "Translation cancelled";
+        return false;
+    }
+    if (stoppedByRepetition) {
+        if (error) {
+            *error = "Translation stopped because the model began repeating output";
+        }
         return false;
     }
     contextPosition_ = promptPosition + tokenCount + decodedTokens;

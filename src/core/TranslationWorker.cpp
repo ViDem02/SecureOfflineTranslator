@@ -64,7 +64,7 @@ bool loadGlossary(const QString &path, QString *glossary, QString *error) {
 
 QVector<QString> splitTranslationInput(const QString &source) {
     // Keep room for the chat template, glossary, and generated translation.
-    constexpr int maxChunkCharacters = 1200;
+    constexpr int maxChunkCharacters = 600;
     QVector<QString> chunks;
     int start = 0;
 

@@ -1,8 +1,8 @@
 {
   "models": [
     {
-      "file": "translategemma-12b-it.Q4_K_M.gguf",
-      "sha256": "f1903507af56f520d329c4ba1474abcf460b10b9c285c20ce506f59b30e9ae63"
+      "file": "translategemma-4b-it.Q4_K_M.gguf",
+      "sha256": "81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330"
     }
   ]
 }
