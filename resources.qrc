@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file>models/approved-models.json</file>
+    </qresource>
+</RCC>

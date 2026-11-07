@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug SecureTranslator",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/SecureTranslator.app/Contents/MacOS/SecureTranslator",
+      "cwd": "${workspaceFolder}",
+      "MIMode": "lldb",
+      "stopAtEntry": false,
+      "externalConsole": false,
+      "environment": [
+        {
+          "name": "SECURE_TRANSLATOR_MODEL",
+          "value": "/Users/vi/OfflineTranslatorModels/translategemma-4b-it.Q4_K_M.gguf"
+        },
+        {
+          "name": "SECURE_TRANSLATOR_MANIFEST",
+          "value": "${workspaceFolder}/models/approved-models.json"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+build/
+build-*/
+*.app/
+*.dmg
+.DS_Store
+
+# Local model: large binary, never commit it.
+model/*.gguf
+
+# Recreated by scripts/fetch-llama.sh at the pinned revision.
+third_party/llama.cpp/
+
+# Local IDE and machine-specific files.
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+compile_commands.json
+
+# CMake and macOS artifacts.
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+._*

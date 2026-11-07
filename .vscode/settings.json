@@ -1,0 +1,24 @@
+{
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.generator": "Ninja",
+  "cmake.configureSettings": {
+    "CMAKE_PREFIX_PATH": "/opt/homebrew"
+  },
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.compilerPath": "/usr/bin/clang++",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.intelliSenseMode": "macos-clang-arm64",
+  "C_Cpp.default.macFrameworkPath": [
+    "/opt/homebrew/lib"
+  ],
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/src",
+    "${workspaceFolder}/build/SecureTranslator_autogen/include",
+    "/opt/homebrew/include",
+    "/opt/homebrew/lib"
+  ],
+  "files.associations": {
+    "*.h": "cpp"
+  }
+}
