@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "core/TranslationController.h"
+#include "security/SecurityStatus.h"
 #include "system/ResourceMonitor.h"
 
 #include <QAction>
@@ -39,6 +40,8 @@ QFrame *card(QWidget *parent) {
 }
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
+    QString securityError;
+    securityReady_ = SecurityStatus::isReady(&securityError);
     setWindowTitle("Secure Offline Translator");
     setMinimumSize(820, 560);
     resize(1100, 720);
@@ -62,8 +65,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     modelStatus_ = new QLabel("Model: bundled", this);
     modelStatus_->setObjectName("statusPill");
     header->addWidget(modelStatus_);
-    securityStatus_ = new QLabel("Security: verify bundle", this);
-    securityStatus_->setObjectName("warningPill");
+    securityStatus_ = new QLabel(this);
+    securityStatus_->setText(securityReady_ ? "Security: sandbox active"
+                                            : "Security: unavailable");
+    if (!securityReady_) securityStatus_->setToolTip(securityError);
+    securityStatus_->setObjectName(securityReady_ ? "statusPill" : "warningPill");
     header->addWidget(securityStatus_);
     resourceStatus_ = new QLabel("Memory: checking", this);
     resourceStatus_->setObjectName("resourcePill");
@@ -169,6 +175,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     translateButton_ = new QPushButton("Translate", this);
     cancelButton_ = new QPushButton("Cancel", this);
     translateButton_->setObjectName("primaryButton");
+    translateButton_->setEnabled(securityReady_);
     cancelButton_->setEnabled(false);
     copyButton_->setEnabled(false);
     saveButton_->setEnabled(false);
@@ -196,7 +203,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         "QProgressBar { border: none; background: #e4e7ec; border-radius: 4px; }"
         "QProgressBar::chunk { background: #6172f3; border-radius: 4px; }");
 
-    controller_ = new TranslationController(this);
+    controller_ = securityReady_ ? new TranslationController(this) : nullptr;
     auto *resourceTimer = new QTimer(this);
     resourceTimer->setInterval(2000);
     connect(resourceTimer, &QTimer::timeout, this, &MainWindow::updateResourceStatus);
@@ -213,11 +220,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         copyButton_->setEnabled(!translatedText_->toPlainText().isEmpty());
         saveButton_->setEnabled(!translatedText_->toPlainText().isEmpty());
     });
-    connect(controller_, &TranslationController::statusChanged, this, &MainWindow::updateStatus);
-    connect(controller_, &TranslationController::partialTranslation,
-            translatedText_, &QTextEdit::setPlainText);
-    connect(controller_, &TranslationController::explanationReady,
-            explanationText_, &QTextEdit::setPlainText);
+    if (controller_) {
+        connect(controller_, &TranslationController::statusChanged,
+                this, &MainWindow::updateStatus);
+        connect(controller_, &TranslationController::partialTranslation,
+                translatedText_, &QTextEdit::setPlainText);
+        connect(controller_, &TranslationController::explanationReady,
+                explanationText_, &QTextEdit::setPlainText);
+    } else {
+        status_->setText("Translation disabled: sandbox verification failed");
+    }
 
     auto *translateAction = new QAction(this);
     translateAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Return));
@@ -228,6 +240,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 MainWindow::~MainWindow() = default;
 
 void MainWindow::translate() {
+    if (!securityReady_ || !controller_) {
+        status_->setText("Translation disabled: " + QStringLiteral("sandbox verification failed"));
+        return;
+    }
     if (sourceText_->toPlainText().trimmed().isEmpty()) {
         status_->setText("Enter text before translating");
         return;

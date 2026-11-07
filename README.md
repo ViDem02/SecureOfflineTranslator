@@ -43,6 +43,19 @@ cmake --build build
 open build/SecureTranslator.app
 ```
 
+Run the security-focused checks with:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+The suite verifies model hash acceptance/rejection, manifest filename
+validation, App Sandbox and no-network entitlements, absence of application
+process-spawning/network APIs, bundle signature validity, and GPU-offload
+configuration. Runtime Metal stress testing and Apple notarization still
+require a release machine and credentials; they are not replaced by static
+checks.
+
 ## VS Code development
 
 Install the recommended extensions:
@@ -79,6 +92,12 @@ On macOS development builds are ad-hoc signed with
 codesign --verify --deep --strict build/SecureTranslator.app
 codesign -d --entitlements :- build/SecureTranslator.app
 ```
+
+At startup, the application also checks the active process entitlements
+(`com.apple.security.app-sandbox` and
+`com.apple.security.files.user-selected.read-write`). If either entitlement
+is missing, translation initialization is blocked and the interface reports
+that security verification failed.
 
 Ad-hoc signing is not notarization. A release build requires an organization
 Developer ID certificate and a separate notarization procedure.

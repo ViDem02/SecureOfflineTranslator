@@ -8,7 +8,8 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Test Widgets)
+include(CTest)
 option(SECURE_TRANSLATOR_SIGN "Sign the macOS app bundle after building" ON)
 set(SECURE_TRANSLATOR_SIGNING_IDENTITY "-" CACHE STRING
     "codesign identity; use '-' for ad-hoc development signing")
@@ -73,6 +74,9 @@ add_executable(SecureTranslator
 
 target_link_libraries(SecureTranslator PRIVATE Qt6::Widgets)
 target_link_libraries(SecureTranslator PRIVATE llama)
+if (APPLE)
+    target_link_libraries(SecureTranslator PRIVATE "-framework Security")
+endif()
 target_include_directories(SecureTranslator PRIVATE src)
 target_compile_definitions(SecureTranslator PRIVATE
     SECURE_TRANSLATOR_BUNDLED_MODEL_FILE="${SECURE_TRANSLATOR_MODEL_FILE}"
@@ -123,3 +127,22 @@ if (APPLE AND SECURE_TRANSLATOR_SIGN)
 endif()
 
 install(TARGETS SecureTranslator BUNDLE DESTINATION .)
+
+if (BUILD_TESTING)
+    add_executable(SecureTranslatorSecurityTests
+        tests/ModelVerifierTests.cpp
+        src/security/ModelVerifier.cpp
+        src/security/ModelVerifier.h
+    )
+    target_link_libraries(SecureTranslatorSecurityTests PRIVATE Qt6::Test)
+    target_include_directories(SecureTranslatorSecurityTests PRIVATE src)
+    add_test(NAME SecureTranslatorSecurityTests COMMAND SecureTranslatorSecurityTests)
+
+    add_test(
+        NAME SecureTranslatorHardeningChecks
+        COMMAND "${CMAKE_COMMAND}"
+            -DPROJECT_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DAPP_BUNDLE=$<TARGET_BUNDLE_DIR:SecureTranslator>
+            -P "${CMAKE_SOURCE_DIR}/tests/hardening_checks.cmake"
+    )
+endif()

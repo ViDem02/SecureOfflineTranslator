@@ -50,4 +50,5 @@ private:
     QLabel *securityStatus_;
     QLabel *resourceStatus_;
     TranslationController *controller_;
+    bool securityReady_ = false;
 };
