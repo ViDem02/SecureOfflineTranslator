@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Secure Offline Translator</title>
+  <style>
+    :root { color-scheme: dark; font: 16px system-ui, sans-serif; }
+    body { max-width: 1100px; margin: auto; padding: 1.5rem; background: #101318; color: #eef2f7; }
+    header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+    .status { padding: .6rem .8rem; border: 1px solid #536274; border-radius: .5rem; }
+    .warning { color: #ffd166; }
+    .controls, .glossary { display: flex; gap: .6rem; flex-wrap: wrap; margin: 1rem 0; }
+    textarea { width: 100%; min-height: 280px; box-sizing: border-box; padding: .8rem; background: #181e27; color: inherit; border: 1px solid #536274; border-radius: .4rem; resize: vertical; }
+    .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    button, select, input { padding: .6rem; border-radius: .35rem; border: 1px solid #718096; background: #202936; color: inherit; }
+    button { cursor: pointer; } button:hover { background: #304158; }
+    .error { color: #ff8f8f; min-height: 1.3rem; }
+    .progress { display: none; margin: .8rem 0; }
+    .progress.visible { display: block; }
+    progress { width: 100%; height: .8rem; }
+    @media (max-width: 720px) { .columns { grid-template-columns: 1fr; } header { display: block; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>Secure Offline Translator</h1><p>Local translation only. No cloud integrations.</p></div>
+    <div id="status" class="status">Checking local model…</div>
+  </header>
+  <div class="controls">
+    <label>From <select id="source"><option value="Italian">Italian</option><option value="English">English</option><option value="French">French</option></select></label>
+    <label>To <select id="target"><option value="English">English</option><option value="Italian">Italian</option><option value="French">French</option></select></label>
+    <input id="file" type="file" accept=".txt,.md,text/plain,text/markdown">
+    <button id="translate">Translate</button>
+    <button id="copy">Copy result</button>
+    <button id="download">Export .txt</button>
+    <button id="clear">Clear session</button>
+  </div>
+  <div class="columns">
+    <section><h2>Original</h2><textarea id="input" placeholder="Enter text or import a TXT/Markdown file"></textarea></section>
+    <section><h2>Translation</h2><textarea id="output" readonly></textarea></section>
+  </div>
+  <div id="progress" class="progress" role="status" aria-live="polite">
+    <span id="progressText">Translating…</span>
+    <progress></progress>
+  </div>
+  <p id="error" class="error" role="alert"></p>
+  <section class="glossary">
+    <strong>Glossary:</strong>
+    <input id="term" placeholder="Term">
+    <input id="termTranslation" placeholder="Preferred translation">
+    <button id="addGlossary">Add</button>
+  </section>
+  <script>
+    let token = "";
+    const $ = id => document.getElementById(id);
+    async function api(path, options = {}) {
+      options.headers = {...options.headers, "X-Session-Token": token};
+      const response = await fetch(path, options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Request failed");
+      return data;
+    }
+    async function refreshStatus() {
+      const s = await fetch("/api/status").then(r => r.json());
+      $("status").textContent = `${s.model_available ? "Model available" : "Model unavailable"} · ${s.network_mode}`;
+      $("status").className = `status ${s.isolated ? "" : "warning"}`;
+    }
+    $("file").onchange = event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024) { $("error").textContent = "File exceeds 10 MB."; return; }
+      file.text().then(text => $("input").value = text);
+    };
+    $("translate").onclick = async () => {
+      $("error").textContent = "";
+      $("translate").disabled = true;
+      $("progress").classList.add("visible");
+      $("progressText").textContent = "Sending text to the local model…";
+      $("output").value = "";
+      try {
+        $("progressText").textContent = "The local model is translating…";
+        const response = await fetch("/api/translate-stream", {method: "POST",
+          headers: {"Content-Type": "application/json", "X-Session-Token": token},
+          body: JSON.stringify({text: $("input").value, source: $("source").value, target: $("target").value})});
+        if (!response.ok && response.headers.get("content-type")?.includes("application/json")) {
+          const data = await response.json(); throw new Error(data.error || "Request failed");
+        }
+        if (!response.body) throw new Error("Streaming is not supported by this browser");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "", received = 0;
+        while (true) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, {stream: true});
+          const lines = buffer.split("\n"); buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line);
+            if (event.error) throw new Error(event.error);
+            if (event.chunk) {
+              received += event.chunk.length;
+              $("output").value += event.chunk;
+              $("progressText").textContent = `The local model is translating… ${received} characters received`;
+            }
+            if (event.translation) $("output").value = event.translation;
+          }
+        }
+        $("progressText").textContent = "Translation completed.";
+      } catch (error) {
+        $("progressText").textContent = "Translation failed.";
+        $("error").textContent = error.message;
+      } finally {
+        $("translate").disabled = false;
+        setTimeout(() => $("progress").classList.remove("visible"), 1500);
+      }
+    };
+    $("input").onkeydown = event => {
+      if (event.shiftKey && event.key === "Enter") {
+        event.preventDefault();
+        $("translate").click();
+      }
+    };
+    $("copy").onclick = () => navigator.clipboard.writeText($("output").value);
+    $("download").onclick = () => {
+      const blob = new Blob([$("output").value], {type: "text/plain;charset=utf-8"});
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "translation.txt"; a.click(); URL.revokeObjectURL(a.href);
+    };
+    $("clear").onclick = async () => { await api("/api/clear", {method: "POST"}); $("input").value = ""; $("output").value = ""; };
+    $("addGlossary").onclick = async () => {
+      try {
+        await api("/api/glossary", {method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({term: $("term").value, translation: $("termTranslation").value})});
+        $("term").value = ""; $("termTranslation").value = "";
+      } catch (error) { $("error").textContent = error.message; }
+    };
+    (async () => { token = (await fetch("/api/session").then(r => r.json())).token; refreshStatus(); })();
+  </script>
+</body>
+</html>
