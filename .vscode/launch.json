@@ -13,7 +13,7 @@
       "environment": [
         {
           "name": "SECURE_TRANSLATOR_MODEL",
-          "value": "/Users/vi/OfflineTranslatorModels/translategemma-4b-it.Q4_K_M.gguf"
+          "value": "/Users/vi/OfflineTranslatorModels/translategemma-12b-it.Q4_K_M.gguf"
         },
         {
           "name": "SECURE_TRANSLATOR_MANIFEST",

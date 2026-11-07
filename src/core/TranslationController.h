@@ -15,6 +15,7 @@ public:
     void translate(const QString &source, const QString &sourceLanguage,
                    const QString &targetLanguage, int maxEndOfTurns, bool includeExplanation);
     void cancel();
+    void setGlossaryYaml(const QString &yaml);
     void openTextFile(const QString &path, QTextEdit *destination);
     bool saveTextFile(const QString &path, const QString &text);
 

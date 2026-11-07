@@ -1,7 +1,7 @@
 {
   "models": [
     {
-      "file": "translategemma-4b-it.Q4_K_M.gguf",
+      "file": "translategemma-12b-it.Q4_K_M.gguf",
       "sha256": "REPLACE_WITH independently verified SHA-256"
     }
   ]

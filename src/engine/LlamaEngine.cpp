@@ -86,6 +86,40 @@ bool LlamaEngine::loadModel(const QString &path, QString *error) {
     return true;
 }
 
+bool LlamaEngine::beginTranslation(QString *error) {
+    if (!model_) {
+        if (error) *error = "No verified model is loaded";
+        return false;
+    }
+    if (context_) {
+        llama_free(context_);
+        context_ = nullptr;
+    }
+    auto params = llama_context_default_params();
+    const auto modelContext = llama_model_n_ctx_train(model_);
+    params.n_ctx = std::min<uint32_t>(8192, modelContext > 0 ? modelContext : 8192);
+    params.n_batch = params.n_ctx;
+    params.n_ubatch = std::min<uint32_t>(512, params.n_ctx);
+    params.n_threads = 4;
+    params.n_threads_batch = 4;
+    context_ = llama_init_from_model(model_, params);
+    if (!context_) {
+        if (error) *error = "The model context could not be created";
+        return false;
+    }
+    contextPosition_ = 0;
+    translationActive_ = true;
+    return true;
+}
+
+void LlamaEngine::endTranslation() {
+    if (context_) {
+        llama_memory_clear(llama_get_memory(context_), true);
+    }
+    contextPosition_ = 0;
+    translationActive_ = false;
+}
+
 bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage,
                             const QString &targetLanguage, const QString &glossary,
                             int maxEndOfTurns,
@@ -101,22 +135,7 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
         return false;
     }
     cancelled_ = false;
-    if (context_) {
-        llama_free(context_);
-        context_ = nullptr;
-    }
-    auto contextParams = llama_context_default_params();
-    const auto modelContext = llama_model_n_ctx_train(model_);
-    contextParams.n_ctx = std::min<uint32_t>(8192, modelContext > 0 ? modelContext : 8192);
-    contextParams.n_batch = contextParams.n_ctx;
-    contextParams.n_ubatch = std::min<uint32_t>(512, contextParams.n_ctx);
-    contextParams.n_threads = 4;
-    contextParams.n_threads_batch = 4;
-    context_ = llama_init_from_model(model_, contextParams);
-    if (!context_) {
-        if (error) *error = "The model context could not be created";
-        return false;
-    }
+    if (!translationActive_ && !beginTranslation(error)) return false;
     const auto prompt = makePrompt(model_, source, sourceLanguage, targetLanguage, glossary,
                                    includeExplanation);
     if (prompt.isEmpty()) {
@@ -154,9 +173,10 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
     }
     auto batch = llama_batch_init(tokenCount, 0, 1);
     batch.n_tokens = tokenCount;
+    const auto promptPosition = contextPosition_;
     for (int32_t i = 0; i < tokenCount; ++i) {
         batch.token[i] = tokens[i];
-        batch.pos[i] = i;
+        batch.pos[i] = promptPosition + i;
         batch.n_seq_id[i] = 1;
         batch.seq_id[i][0] = 0;
         batch.logits[i] = i == tokenCount - 1;
@@ -183,6 +203,7 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
     QByteArray outputBytes;
     int endOfTurnCount = 0;
     const auto maxGeneratedTokens = availableTokens;
+    int decodedTokens = 0;
     bool stoppedByEndOfTurn = false;
     for (int i = 0; i < maxGeneratedTokens && !cancelled_; ++i) {
         const auto token = llama_sampler_sample(sampler, context_, -1);
@@ -228,7 +249,7 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
         }
         nextBatch.n_tokens = 1;
         nextBatch.token[0] = token;
-        nextBatch.pos[0] = tokenCount + i;
+        nextBatch.pos[0] = promptPosition + tokenCount + i;
         nextBatch.n_seq_id[0] = 1;
         nextBatch.seq_id[0][0] = 0;
         nextBatch.logits[0] = 1;
@@ -243,6 +264,7 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
             llama_sampler_free(sampler);
             return false;
         }
+        ++decodedTokens;
     }
     llama_batch_free(nextBatch);
     llama_sampler_free(sampler);
@@ -250,6 +272,7 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
         if (error) *error = "Translation cancelled";
         return false;
     }
+    contextPosition_ = promptPosition + tokenCount + decodedTokens;
     if (!stoppedByEndOfTurn) {
         if (error) {
             *error = QString("Translation output reached the context limit "

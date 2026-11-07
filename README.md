@@ -18,7 +18,7 @@ directory structure is preserved by `model/.gitkeep`; copy exactly one local
 `.gguf` file there before configuring CMake:
 
 ```sh
-cp /path/to/translategemma-4b-it.Q4_K_M.gguf model/
+cp /path/to/translategemma-12b-it.Q4_K_M.gguf model/
 ```
 
 `llama.cpp` is pinned to commit
@@ -124,7 +124,7 @@ generated-token batches use explicit positions, sequence IDs, and logits.
 Place exactly one GGUF model in the project `model/` folder:
 
 ```sh
-cp /path/to/translategemma-4b-it.Q4_K_M.gguf model/
+cp /path/to/translategemma-12b-it.Q4_K_M.gguf model/
 cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/homebrew
 cmake --build build
 ```
@@ -143,8 +143,12 @@ displayed in its own panel and is not included in the saved translation.
 
 Long input is translated incrementally. The worker splits it into bounded
 chunks, preferring paragraph, line, sentence, and word boundaries, then
-translates and recombines the chunks in order. This avoids exhausting the
-model context while supporting arbitrarily large finite text inputs.
+translates and recombines the chunks in order. All chunks in one request share
+the same llama.cpp context, so terminology and preceding translation decisions
+remain available to later chunks. The context memory is cleared when the
+request completes or is cancelled. The finite context window still imposes a
+maximum amount of cross-part history per request; the application rejects an
+unsafe overflow instead of decoding past the limit.
 
 At startup the application verifies the bundled model hash and loads the GGUF
 once on the worker thread. Translations reuse that loaded model; verification
@@ -177,7 +181,7 @@ independent, trusted source:
 {
   "models": [
     {
-      "file": "translategemma-4b-it.Q4_K_M.gguf",
+      "file": "translategemma-12b-it.Q4_K_M.gguf",
       "sha256": "trusted-lowercase-sha256"
     }
   ]
@@ -187,12 +191,12 @@ independent, trusted source:
 `models/approved-models.example.json` is only a schema example. Its placeholder
 hash is intentionally rejected. The application rejects missing files,
 unknown file names, and every hash that is not present in the manifest.
-Changing from the 4B model to the 12B model requires only the configured path
-and a separately approved manifest entry.
+The configured model is TranslateGemma 12B Q4_K_M. Replacing it with another
+model requires a separately approved manifest entry and a rebuild.
 
-The current debug manifest authorizes the configured TranslateGemma 4B file
-with SHA-256
-`81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330`.
+The current manifest authorizes the configured TranslateGemma 12B file with
+SHA-256
+`f1903507af56f520d329c4ba1474abcf460b10b9c285c20ce506f59b30e9ae63`.
 The hash was verified locally before loading. The model file itself is not
 stored in this repository.
 

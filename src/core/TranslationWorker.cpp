@@ -19,19 +19,10 @@ QString unquote(QString value) {
     return value;
 }
 
-bool loadGlossary(const QString &path, QString *glossary, QString *error) {
-    glossary->clear();
-    if (path.isEmpty()) return true;
-
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        *error = "Glossary cannot be opened: " + path;
-        return false;
-    }
-
+bool parseGlossary(const QString &yaml, QString *glossary, QString *error) {
     QString source;
     QStringList terms;
-    const auto lines = QString::fromUtf8(file.readAll()).split('\n');
+    const auto lines = yaml.split('\n');
     for (const auto &line : lines) {
         const auto trimmed = line.trimmed();
         if (trimmed.isEmpty() || trimmed.startsWith('#') || trimmed == "terms:") continue;
@@ -58,6 +49,17 @@ bool loadGlossary(const QString &path, QString *glossary, QString *error) {
     }
     *glossary = terms.join('\n');
     return true;
+}
+
+bool loadGlossary(const QString &path, QString *glossary, QString *error) {
+    glossary->clear();
+    if (path.isEmpty()) return true;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        *error = "Glossary cannot be opened: " + path;
+        return false;
+    }
+    return parseGlossary(QString::fromUtf8(file.readAll()), glossary, error);
 }
 
 QVector<QString> splitTranslationInput(const QString &source) {
@@ -147,6 +149,18 @@ void TranslationWorker::initializeModel() {
     emit statusChanged("Model ready");
 }
 
+void TranslationWorker::setGlossaryYaml(const QString &yaml) {
+    QString parsed;
+    QString error;
+    if (!parseGlossary(yaml, &parsed, &error)) {
+        emit statusChanged("Error: " + error);
+        return;
+    }
+    glossaryYaml_ = yaml;
+    glossary_ = parsed;
+    emit statusChanged("Glossary updated");
+}
+
 void TranslationWorker::translate(const QString &source, const QString &sourceLanguage,
                                  const QString &targetLanguage, int maxEndOfTurns,
                                  bool includeExplanation) {
@@ -159,6 +173,10 @@ void TranslationWorker::translate(const QString &source, const QString &sourceLa
     const auto chunks = splitTranslationInput(source);
     QString completeTranslation;
     QString completeExplanation;
+    if (!engine_->beginTranslation(&error)) {
+        emit statusChanged("Error: " + error);
+        return;
+    }
 
     for (qsizetype chunkIndex = 0; chunkIndex < chunks.size() && !cancelled_; ++chunkIndex) {
         emit statusChanged(QString("Translating part %1/%2")
@@ -176,6 +194,7 @@ void TranslationWorker::translate(const QString &source, const QString &sourceLa
             },
             &error);
         if (!completed) {
+            engine_->endTranslation();
             if (cancelled_) {
                 emit statusChanged("Cancelled");
             } else {
@@ -206,9 +225,11 @@ void TranslationWorker::translate(const QString &source, const QString &sourceLa
     }
 
     if (cancelled_) {
+        engine_->endTranslation();
         emit statusChanged("Cancelled");
         return;
     }
+    engine_->endTranslation();
     emit partialTranslation(completeTranslation);
     if (includeExplanation) {
         emit explanationReady(completeExplanation);

@@ -42,6 +42,11 @@ void TranslationController::cancel() {
     worker_->requestCancel();
 }
 
+void TranslationController::setGlossaryYaml(const QString &yaml) {
+    QMetaObject::invokeMethod(worker_, "setGlossaryYaml", Qt::QueuedConnection,
+                              Q_ARG(QString, yaml));
+}
+
 void TranslationController::openTextFile(const QString &path, QTextEdit *destination) {
     QString text;
     QString error;

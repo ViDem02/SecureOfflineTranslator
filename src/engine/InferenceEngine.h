@@ -10,6 +10,8 @@ public:
 
     virtual ~InferenceEngine() = default;
     virtual bool loadModel(const QString &path, QString *error) = 0;
+    virtual bool beginTranslation(QString *error) = 0;
+    virtual void endTranslation() = 0;
     virtual bool translate(const QString &source, const QString &sourceLanguage,
                            const QString &targetLanguage, const QString &glossary,
                            int maxEndOfTurns,

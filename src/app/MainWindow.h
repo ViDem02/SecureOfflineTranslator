@@ -27,6 +27,9 @@ private:
     void copyTranslation();
     void clearText();
     void swapLanguages();
+    void importGlossary();
+    void exportGlossary();
+    void editGlossary();
     void updateSourceCount();
     void updateStatus(const QString &status);
     void updateResourceStatus();
@@ -51,4 +54,5 @@ private:
     QLabel *resourceStatus_;
     TranslationController *controller_;
     bool securityReady_ = false;
+    QString glossaryYaml_;
 };

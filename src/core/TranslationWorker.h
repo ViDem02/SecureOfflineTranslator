@@ -17,6 +17,7 @@ public slots:
                    const QString &targetLanguage, int maxEndOfTurns, bool includeExplanation);
     void cancel();
     void requestCancel();
+    void setGlossaryYaml(const QString &yaml);
 
 signals:
     void partialTranslation(const QString &text);
@@ -28,4 +29,5 @@ private:
     class LlamaEngine *engine_;
     bool modelLoaded_ = false;
     QString glossary_;
+    QString glossaryYaml_;
 };

@@ -9,13 +9,17 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QClipboard>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
+#include <QFile>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
 #include <QProgressBar>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QSpinBox>
@@ -84,6 +88,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     auto *clearAction = toolbar->addAction("Clear");
     toolbar->addSeparator();
     auto *swapAction = toolbar->addAction("Swap languages");
+    toolbar->addSeparator();
+    auto *importGlossaryAction = toolbar->addAction("Import glossary");
+    auto *exportGlossaryAction = toolbar->addAction("Export glossary");
+    auto *editGlossaryAction = toolbar->addAction("Edit glossary");
     openAction->setShortcut(QKeySequence::Open);
     saveAction->setShortcut(QKeySequence::Save);
     clearAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
@@ -92,6 +100,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(saveAction, &QAction::triggered, this, &MainWindow::saveTranslation);
     connect(clearAction, &QAction::triggered, this, &MainWindow::clearText);
     connect(swapAction, &QAction::triggered, this, &MainWindow::swapLanguages);
+    connect(importGlossaryAction, &QAction::triggered, this, &MainWindow::importGlossary);
+    connect(exportGlossaryAction, &QAction::triggered, this, &MainWindow::exportGlossary);
+    connect(editGlossaryAction, &QAction::triggered, this, &MainWindow::editGlossary);
 
     auto *languageRow = new QHBoxLayout();
     languageRow->addWidget(new QLabel("Translate", this));
@@ -260,6 +271,52 @@ void MainWindow::translate() {
 
 void MainWindow::cancel() {
     controller_->cancel();
+}
+
+void MainWindow::importGlossary() {
+    const auto path = QFileDialog::getOpenFileName(this, "Import glossary", {}, "YAML (*.yaml)");
+    if (path.isEmpty()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, "Import failed", "The glossary could not be opened.");
+        return;
+    }
+    glossaryYaml_ = QString::fromUtf8(file.readAll());
+    if (controller_) controller_->setGlossaryYaml(glossaryYaml_);
+}
+
+void MainWindow::exportGlossary() {
+    if (glossaryYaml_.trimmed().isEmpty()) {
+        QMessageBox::information(this, "Export glossary", "No edited glossary is loaded.");
+        return;
+    }
+    const auto path = QFileDialog::getSaveFileName(this, "Export glossary", {}, "YAML (*.yaml)");
+    if (path.isEmpty()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text) ||
+        file.write(glossaryYaml_.toUtf8()) < 0) {
+        QMessageBox::critical(this, "Export failed", "The glossary could not be saved.");
+    }
+}
+
+void MainWindow::editGlossary() {
+    QDialog dialog(this);
+    dialog.setWindowTitle("Edit glossary");
+    dialog.resize(600, 400);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *editor = new QPlainTextEdit(&dialog);
+    editor->setPlainText(glossaryYaml_.isEmpty()
+        ? QStringLiteral("terms:\n  - source: \"term\"\n    target: \"terme\"\n")
+        : glossaryYaml_);
+    layout->addWidget(editor);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() == QDialog::Accepted) {
+        glossaryYaml_ = editor->toPlainText();
+        if (controller_) controller_->setGlossaryYaml(glossaryYaml_);
+    }
 }
 
 void MainWindow::openTextFile() {
