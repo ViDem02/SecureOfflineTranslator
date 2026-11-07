@@ -14,12 +14,13 @@ public:
 public slots:
     void initializeModel();
     void translate(const QString &source, const QString &sourceLanguage,
-                   const QString &targetLanguage);
+                   const QString &targetLanguage, int maxEndOfTurns, bool includeExplanation);
     void cancel();
     void requestCancel();
 
 signals:
     void partialTranslation(const QString &text);
+    void explanationReady(const QString &text);
     void statusChanged(const QString &status);
 
 private:

@@ -66,6 +66,8 @@ add_executable(SecureTranslator
     src/security/SecurityStatus.h
     src/storage/FileAccess.cpp
     src/storage/FileAccess.h
+    src/system/ResourceMonitor.cpp
+    src/system/ResourceMonitor.h
     resources.qrc
 )
 

@@ -13,6 +13,8 @@ TranslationController::TranslationController(QObject *parent)
     worker_->moveToThread(thread_);
     connect(worker_, &TranslationWorker::partialTranslation,
             this, &TranslationController::partialTranslation);
+    connect(worker_, &TranslationWorker::explanationReady,
+            this, &TranslationController::explanationReady);
     connect(worker_, &TranslationWorker::statusChanged,
             this, &TranslationController::statusChanged);
     connect(thread_, &QThread::finished, worker_, &QObject::deleteLater);
@@ -26,11 +28,14 @@ TranslationController::~TranslationController() {
 }
 
 void TranslationController::translate(const QString &source, const QString &sourceLanguage,
-                                      const QString &targetLanguage) {
+                                      const QString &targetLanguage, int maxEndOfTurns,
+                                      bool includeExplanation) {
     QMetaObject::invokeMethod(worker_, "translate", Qt::QueuedConnection,
                               Q_ARG(QString, source),
                               Q_ARG(QString, sourceLanguage),
-                              Q_ARG(QString, targetLanguage));
+                              Q_ARG(QString, targetLanguage),
+                              Q_ARG(int, maxEndOfTurns),
+                              Q_ARG(bool, includeExplanation));
 }
 
 void TranslationController::cancel() {

@@ -2,28 +2,40 @@
 
 #include <llama.h>
 
+#include <algorithm>
+
 #include <QByteArray>
 #include <QVector>
 
 namespace {
 QString makePrompt(const llama_model *model, const QString &source,
                    const QString &sourceLanguage, const QString &targetLanguage,
-                   const QString &glossary) {
+                   const QString &glossary, bool includeExplanation) {
+    const auto outputInstruction = includeExplanation
+        ? QStringLiteral(" After the translation, add a section exactly named "
+                         "EXPLANATION: and briefly explain the main translation choices.")
+        : QString();
     const auto glossaryInstruction = glossary.isEmpty()
         ? QString()
         : QString("\n\nUse these glossary terms when applicable:\n%1").arg(glossary);
     const auto *templateName = llama_model_chat_template(model, nullptr);
     if (!templateName) {
-        return QString("Translate from %1 to %2. Preserve numbers, units, symbols, "
-                       "identifiers, and line breaks. Return only the translation.%3\n\n%4")
-            .arg(sourceLanguage, targetLanguage, glossaryInstruction, source);
+        return QString("You are a professional translator. Translate the text below "
+                       "from %1 to %2. Do not repeat the source text, explain your work, "
+                       "or add commentary. Return only the translation. Preserve numbers, "
+                       "units, symbols, identifiers, formatting, and line breaks.%3%4\n\n"
+                       "SOURCE TEXT:\n%5\n\nTRANSLATION:")
+            .arg(sourceLanguage, targetLanguage, glossaryInstruction, outputInstruction, source);
     }
     const auto systemText =
-        QStringLiteral("Translate faithfully. Preserve numbers, units, symbols, identifiers, "
-                       "formatting, and line breaks. Return only the translation.")
-        + glossaryInstruction;
+        QStringLiteral("You are a professional translator. Translate the user's text "
+                       "faithfully. Never repeat the source text, explain your work, or add "
+                       "commentary. Return only the translation. Preserve numbers, units, "
+                       "symbols, identifiers, formatting, and line breaks.")
+                       + outputInstruction + glossaryInstruction;
     const QByteArray system = systemText.toUtf8();
-    const QByteArray user = QString("Translate from %1 to %2:\n\n%3")
+    const QByteArray user = QString("Translate the following text from %1 to %2. "
+                                    "Return only the %2 translation:\n\n%3")
                                 .arg(sourceLanguage, targetLanguage, source)
                                 .toUtf8();
     llama_chat_message messages[] = {
@@ -58,8 +70,10 @@ bool LlamaEngine::loadModel(const QString &path, QString *error) {
         return false;
     }
     auto contextParams = llama_context_default_params();
-    contextParams.n_ctx = 4096;
-    contextParams.n_batch = 512;
+    const auto modelContext = llama_model_n_ctx_train(model_);
+    contextParams.n_ctx = std::min<uint32_t>(8192, modelContext > 0 ? modelContext : 8192);
+    contextParams.n_batch = contextParams.n_ctx;
+    contextParams.n_ubatch = std::min<uint32_t>(512, contextParams.n_ctx);
     contextParams.n_threads = 4;
     contextParams.n_threads_batch = 4;
     context_ = llama_init_from_model(model_, contextParams);
@@ -74,15 +88,37 @@ bool LlamaEngine::loadModel(const QString &path, QString *error) {
 
 bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage,
                             const QString &targetLanguage, const QString &glossary,
+                            int maxEndOfTurns,
+                            bool includeExplanation,
                             const PartialResult &onPartial,
                             QString *error) {
     if (!model_ || !context_) {
         if (error) *error = "No verified model is loaded";
         return false;
     }
+    if (maxEndOfTurns < 1) {
+        if (error) *error = "Maximum end_of_turn count must be at least 1";
+        return false;
+    }
     cancelled_ = false;
-    llama_memory_clear(llama_get_memory(context_), true);
-    const auto prompt = makePrompt(model_, source, sourceLanguage, targetLanguage, glossary);
+    if (context_) {
+        llama_free(context_);
+        context_ = nullptr;
+    }
+    auto contextParams = llama_context_default_params();
+    const auto modelContext = llama_model_n_ctx_train(model_);
+    contextParams.n_ctx = std::min<uint32_t>(8192, modelContext > 0 ? modelContext : 8192);
+    contextParams.n_batch = contextParams.n_ctx;
+    contextParams.n_ubatch = std::min<uint32_t>(512, contextParams.n_ctx);
+    contextParams.n_threads = 4;
+    contextParams.n_threads_batch = 4;
+    context_ = llama_init_from_model(model_, contextParams);
+    if (!context_) {
+        if (error) *error = "The model context could not be created";
+        return false;
+    }
+    const auto prompt = makePrompt(model_, source, sourceLanguage, targetLanguage, glossary,
+                                   includeExplanation);
     if (prompt.isEmpty()) {
         if (error) *error = "The model chat template could not be applied";
         return false;
@@ -102,39 +138,125 @@ bool LlamaEngine::translate(const QString &source, const QString &sourceLanguage
         return false;
     }
     tokens.resize(tokenCount);
-    auto batch = llama_batch_get_one(tokens.data(), tokenCount);
-    if (llama_decode(context_, batch) != 0) {
-        if (error) *error = "The model could not process the prompt";
+    const auto contextSize = static_cast<int>(llama_n_ctx(context_));
+    if (tokenCount >= contextSize) {
+        if (error) {
+            *error = QString("Translation part is too large for the model context "
+                             "(prompt tokens=%1, context=%2)")
+                         .arg(tokenCount).arg(contextSize);
+        }
+        return false;
+    }
+    const auto availableTokens = contextSize - tokenCount - 1;
+    if (availableTokens <= 0) {
+        if (error) *error = "Input is too large for the model context";
+        return false;
+    }
+    auto batch = llama_batch_init(tokenCount, 0, 1);
+    batch.n_tokens = tokenCount;
+    for (int32_t i = 0; i < tokenCount; ++i) {
+        batch.token[i] = tokens[i];
+        batch.pos[i] = i;
+        batch.n_seq_id[i] = 1;
+        batch.seq_id[i][0] = 0;
+        batch.logits[i] = i == tokenCount - 1;
+    }
+    const auto promptDecode = llama_decode(context_, batch);
+    llama_batch_free(batch);
+    if (promptDecode != 0) {
+        if (error) {
+            *error = QString("The model could not process the prompt (llama_decode=%1, "
+                             "tokens=%2, context=%3)")
+                         .arg(promptDecode).arg(tokenCount).arg(llama_n_ctx(context_));
+        }
         return false;
     }
     auto samplerParams = llama_sampler_chain_default_params();
     auto *sampler = llama_sampler_chain_init(samplerParams);
+    if (!sampler) {
+        if (error) *error = "The sampler could not be created";
+        return false;
+    }
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.2f));
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
-    QString output;
-    for (int i = 0; i < 512 && !cancelled_; ++i) {
+    auto nextBatch = llama_batch_init(1, 0, 1);
+    QByteArray outputBytes;
+    int endOfTurnCount = 0;
+    const auto maxGeneratedTokens = availableTokens;
+    bool stoppedByEndOfTurn = false;
+    for (int i = 0; i < maxGeneratedTokens && !cancelled_; ++i) {
         const auto token = llama_sampler_sample(sampler, context_, -1);
-        if (llama_vocab_is_eog(vocab, token) || llama_vocab_is_control(vocab, token)) {
-            break;
+        if (llama_vocab_is_eog(vocab, token)) {
+            ++endOfTurnCount;
+            if (endOfTurnCount >= maxEndOfTurns) {
+                stoppedByEndOfTurn = true;
+                break;
+            }
         }
         llama_sampler_accept(sampler, token);
         char piece[256];
         const auto length = llama_token_to_piece(vocab, token, piece, sizeof(piece), 0, false);
         if (length > 0) {
-            const auto chunk = QString::fromUtf8(piece, length);
-            output += chunk;
-            onPartial(output);
+            outputBytes.append(piece, length);
+            const auto output = QString::fromUtf8(outputBytes);
+            const auto endOfTurn = output.indexOf("<end_of_turn>");
+            if (endOfTurn >= 0) {
+                outputBytes = output.left(endOfTurn).toUtf8();
+                onPartial(QString::fromUtf8(outputBytes));
+                ++endOfTurnCount;
+                if (endOfTurnCount >= maxEndOfTurns) {
+                    stoppedByEndOfTurn = true;
+                    break;
+                }
+            } else {
+                const auto startOfTurn = output.indexOf("<start_of_turn>");
+                if (startOfTurn >= 0) {
+                    outputBytes = output.left(startOfTurn).toUtf8();
+                    onPartial(QString::fromUtf8(outputBytes));
+                    ++endOfTurnCount;
+                    if (endOfTurnCount >= maxEndOfTurns) {
+                        stoppedByEndOfTurn = true;
+                        break;
+                    }
+                } else {
+                    onPartial(output);
+                }
+            }
         }
-        auto next = llama_batch_get_one(const_cast<llama_token *>(&token), 1);
-        if (llama_decode(context_, next) != 0) {
-            if (error) *error = "The model ran out of context or memory";
+        if (i + 1 >= maxGeneratedTokens) {
+            break;
+        }
+        nextBatch.n_tokens = 1;
+        nextBatch.token[0] = token;
+        nextBatch.pos[0] = tokenCount + i;
+        nextBatch.n_seq_id[0] = 1;
+        nextBatch.seq_id[0][0] = 0;
+        nextBatch.logits[0] = 1;
+        const auto tokenDecode = llama_decode(context_, nextBatch);
+        if (tokenDecode != 0) {
+            if (error) {
+                *error = QString("The model ran out of context or memory "
+                                 "(llama_decode=%1, generated=%2, context=%3)")
+                             .arg(tokenDecode).arg(i + 1).arg(llama_n_ctx(context_));
+            }
+            llama_batch_free(nextBatch);
             llama_sampler_free(sampler);
             return false;
         }
     }
+    llama_batch_free(nextBatch);
     llama_sampler_free(sampler);
     if (cancelled_) {
         if (error) *error = "Translation cancelled";
+        return false;
+    }
+    if (!stoppedByEndOfTurn) {
+        if (error) {
+            *error = QString("Translation output reached the context limit "
+                             "(generated=%1, context=%2); the part must be split "
+                             "into smaller sections")
+                         .arg(maxGeneratedTokens).arg(llama_n_ctx(context_));
+        }
         return false;
     }
     return true;

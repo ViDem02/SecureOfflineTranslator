@@ -3,7 +3,9 @@
 #include <QMainWindow>
 
 class QComboBox;
+class QCheckBox;
 class QProgressBar;
+class QSpinBox;
 class QPushButton;
 class QTextEdit;
 class QLabel;
@@ -27,11 +29,15 @@ private:
     void swapLanguages();
     void updateSourceCount();
     void updateStatus(const QString &status);
+    void updateResourceStatus();
 
     QTextEdit *sourceText_;
     QTextEdit *translatedText_;
+    QTextEdit *explanationText_;
     QComboBox *sourceLanguage_;
     QComboBox *targetLanguage_;
+    QSpinBox *maxEndOfTurns_;
+    QCheckBox *includeExplanation_;
     QProgressBar *progress_;
     QLabel *status_;
     QPushButton *translateButton_;
@@ -42,5 +48,6 @@ private:
     QLabel *translationCount_;
     QLabel *modelStatus_;
     QLabel *securityStatus_;
+    QLabel *resourceStatus_;
     TranslationController *controller_;
 };

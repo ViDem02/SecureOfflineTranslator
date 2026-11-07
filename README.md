@@ -34,10 +34,6 @@ The script downloads only the pinned build dependency into
 network access. If the vendored directory is already present, do not run the
 script again: it refuses to overwrite existing files.
 
-The vendored dependency is intentionally ignored by Git to keep commits small.
-The pinned revision and reconstruction command above are the source-control
-record of the dependency.
-
 Install the build tools and Qt locally, then configure and build:
 
 ```sh
@@ -101,8 +97,10 @@ In VS Code, use `Cmd+Shift+B` to run the default build task or select
 ## Model integration status
 
 The application skeleton, Qt GUI, file access, SHA-256 verifier, and worker
-thread boundary are present. The inference adapter uses the local `llama.cpp`
-library with GPU offload enabled (`n_gpu_layers = -1`) for Apple Silicon.
+thread boundary are present. The local `llama.cpp` model uses full Metal
+offload (`n_gpu_layers = -1`) for Apple Silicon. The context is configured up
+to 8192 tokens, subject to the model's training limit. Prompt and
+generated-token batches use explicit positions, sequence IDs, and logits.
 
 Place exactly one GGUF model in the project `model/` folder:
 
@@ -117,6 +115,17 @@ into `SecureTranslator.app/Contents/Resources` and loaded from inside the
 signed application bundle. To use another model, replace the file in `model/`
 and rebuild the app. The application does not accept a second model path at
 runtime.
+
+The interface also provides a `max end_of_turn` setting from 1 to 8. The
+decoder stops after reaching that many end-of-turn markers; the default is 1.
+
+Enable **Explain** to ask Gemma for a separate explanation. The explanation is
+displayed in its own panel and is not included in the saved translation.
+
+Long input is translated incrementally. The worker splits it into bounded
+chunks, preferring paragraph, line, sentence, and word boundaries, then
+translates and recombines the chunks in order. This avoids exhausting the
+model context while supporting arbitrarily large finite text inputs.
 
 At startup the application verifies the bundled model hash and loads the GGUF
 once on the worker thread. Translations reuse that loaded model; verification
@@ -141,7 +150,6 @@ No model is downloaded automatically, and the source GGUF is not modified.
 The approved manifest is also embedded in the application bundle. If
 `SECURE_TRANSLATOR_MANIFEST` is not set, the application uses that embedded
 copy, which works correctly under App Sandbox.
-
 
 The manifest must contain the exact file name and a SHA-256 obtained from an
 independent, trusted source:
@@ -168,6 +176,15 @@ with SHA-256
 `81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330`.
 The hash was verified locally before loading. The model file itself is not
 stored in this repository.
+
+The interface displays the host's currently available memory and refreshes it
+every two seconds. This is a local diagnostic only: CPU and GPU saturation are
+not yet reported, and no resource data leaves the application.
+
+Text files are read and written as UTF-8. Prompt and generated text are
+decoded cumulatively so multibyte characters, accented characters, CJK text,
+and emoji are not split between model tokens. The model's own tokenizer still
+determines translation quality for each language.
 
 This project is not a security certification. The signed App Sandbox bundle,
 entitlements, model provenance, and negative security tests must be validated

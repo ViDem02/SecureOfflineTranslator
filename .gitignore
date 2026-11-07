@@ -7,7 +7,7 @@ build-*/
 # Local model: large binary, never commit it.
 model/*.gguf
 
-# Recreated by scripts/fetch-llama.sh at the pinned revision.
+# Reproducible build dependency; recreate it with scripts/fetch-llama.sh.
 third_party/llama.cpp/
 
 # Local IDE and machine-specific files.

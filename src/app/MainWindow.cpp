@@ -1,9 +1,11 @@
 #include "MainWindow.h"
 
 #include "core/TranslationController.h"
+#include "system/ResourceMonitor.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QClipboard>
 #include <QFileDialog>
@@ -15,8 +17,10 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSizePolicy>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QTextEdit>
+#include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -61,6 +65,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     securityStatus_ = new QLabel("Security: verify bundle", this);
     securityStatus_->setObjectName("warningPill");
     header->addWidget(securityStatus_);
+    resourceStatus_ = new QLabel("Memory: checking", this);
+    resourceStatus_->setObjectName("resourcePill");
+    header->addWidget(resourceStatus_);
     root->addLayout(header);
 
     auto *toolbar = addToolBar("File");
@@ -87,9 +94,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     sourceLanguage_->addItems({"Italian", "English", "French"});
     targetLanguage_->addItems({"English", "Italian", "French"});
     targetLanguage_->setCurrentText("English");
+    maxEndOfTurns_ = new QSpinBox(this);
+    maxEndOfTurns_->setRange(1, 8);
+    maxEndOfTurns_->setValue(1);
+    maxEndOfTurns_->setToolTip("Maximum number of end_of_turn markers before stopping");
+    includeExplanation_ = new QCheckBox("Explain", this);
+    includeExplanation_->setChecked(true);
+    includeExplanation_->setToolTip("Ask Gemma to explain the translation");
     languageRow->addWidget(sourceLanguage_);
     languageRow->addWidget(new QLabel("to", this));
     languageRow->addWidget(targetLanguage_);
+    languageRow->addWidget(new QLabel("max end_of_turn", this));
+    languageRow->addWidget(maxEndOfTurns_);
+    languageRow->addWidget(includeExplanation_);
     languageRow->addStretch();
     root->addLayout(languageRow);
 
@@ -124,6 +141,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     translatedText_->setReadOnly(true);
     translatedText_->setPlaceholderText("The local translation will appear here…");
     translationLayout->addWidget(translatedText_);
+    translationLayout->addWidget(new QLabel("Explanation", translationPanel));
+    explanationText_ = new QTextEdit(translationPanel);
+    explanationText_->setReadOnly(true);
+    explanationText_->setPlaceholderText("Optional explanation from Gemma…");
+    explanationText_->setMaximumHeight(120);
+    translationLayout->addWidget(explanationText_);
 
     panels->addWidget(sourcePanel);
     panels->addWidget(translationPanel);
@@ -174,19 +197,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         "QProgressBar::chunk { background: #6172f3; border-radius: 4px; }");
 
     controller_ = new TranslationController(this);
+    auto *resourceTimer = new QTimer(this);
+    resourceTimer->setInterval(2000);
+    connect(resourceTimer, &QTimer::timeout, this, &MainWindow::updateResourceStatus);
+    resourceTimer->start();
+    updateResourceStatus();
     connect(translateButton_, &QPushButton::clicked, this, &MainWindow::translate);
     connect(cancelButton_, &QPushButton::clicked, this, &MainWindow::cancel);
     connect(copyButton_, &QPushButton::clicked, this, &MainWindow::copyTranslation);
     connect(saveButton_, &QPushButton::clicked, this, &MainWindow::saveTranslation);
     connect(sourceText_, &QTextEdit::textChanged, this, &MainWindow::updateSourceCount);
     connect(translatedText_, &QTextEdit::textChanged, this, [this] {
-        translationCount_->setText(QString("%1 characters").arg(translatedText_->toPlainText().size()));
+        translationCount_->setText(QString("%1 characters")
+            .arg(translatedText_->toPlainText().toUcs4().size()));
         copyButton_->setEnabled(!translatedText_->toPlainText().isEmpty());
         saveButton_->setEnabled(!translatedText_->toPlainText().isEmpty());
     });
     connect(controller_, &TranslationController::statusChanged, this, &MainWindow::updateStatus);
     connect(controller_, &TranslationController::partialTranslation,
             translatedText_, &QTextEdit::setPlainText);
+    connect(controller_, &TranslationController::explanationReady,
+            explanationText_, &QTextEdit::setPlainText);
 
     auto *translateAction = new QAction(this);
     translateAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Return));
@@ -207,7 +238,8 @@ void MainWindow::translate() {
     cancelButton_->setEnabled(true);
     status_->setText("Preparing translation…");
     controller_->translate(sourceText_->toPlainText(), sourceLanguage_->currentText(),
-                           targetLanguage_->currentText());
+                           targetLanguage_->currentText(), maxEndOfTurns_->value(),
+                           includeExplanation_->isChecked());
 }
 
 void MainWindow::cancel() {
@@ -244,7 +276,12 @@ void MainWindow::swapLanguages() {
 }
 
 void MainWindow::updateSourceCount() {
-    sourceCount_->setText(QString("%1 characters").arg(sourceText_->toPlainText().size()));
+    sourceCount_->setText(QString("%1 characters")
+        .arg(sourceText_->toPlainText().toUcs4().size()));
+}
+
+void MainWindow::updateResourceStatus() {
+    resourceStatus_->setText(ResourceMonitor::memoryStatus());
 }
 
 void MainWindow::updateStatus(const QString &status) {

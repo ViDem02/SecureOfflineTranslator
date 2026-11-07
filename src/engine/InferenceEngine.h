@@ -12,6 +12,8 @@ public:
     virtual bool loadModel(const QString &path, QString *error) = 0;
     virtual bool translate(const QString &source, const QString &sourceLanguage,
                            const QString &targetLanguage, const QString &glossary,
+                           int maxEndOfTurns,
+                           bool includeExplanation,
                            const PartialResult &onPartial,
                            QString *error) = 0;
     virtual void cancel() = 0;

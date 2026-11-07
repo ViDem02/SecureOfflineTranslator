@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QVector>
 
 namespace {
 QString unquote(QString value) {
@@ -58,6 +59,51 @@ bool loadGlossary(const QString &path, QString *glossary, QString *error) {
     *glossary = terms.join('\n');
     return true;
 }
+
+QVector<QString> splitTranslationInput(const QString &source) {
+    // Keep room for the chat template, glossary, and generated translation.
+    constexpr int maxChunkCharacters = 1200;
+    QVector<QString> chunks;
+    int start = 0;
+
+    while (start < source.size()) {
+        const int remaining = source.size() - start;
+        if (remaining <= maxChunkCharacters) {
+            chunks.append(source.mid(start));
+            break;
+        }
+
+        const int limit = start + maxChunkCharacters;
+        int cut = source.lastIndexOf(QStringLiteral("\n\n"), limit - 1);
+        if (cut >= start + maxChunkCharacters / 2) {
+            cut += 2;
+        } else {
+            cut = -1;
+            for (int i = limit - 1; i > start + maxChunkCharacters / 2; --i) {
+                const QChar character = source.at(i);
+                const bool sentenceEnd = (character == '.' || character == '!' ||
+                                          character == '?' || character == ':' ||
+                                          character == ';');
+                if (sentenceEnd && i + 1 < source.size() &&
+                    source.at(i + 1).isSpace()) {
+                    cut = i + 1;
+                    break;
+                }
+            }
+            if (cut < 0) {
+                cut = source.lastIndexOf(QChar(' '), limit - 1);
+            }
+            if (cut <= start) {
+                cut = limit;
+            }
+        }
+
+        chunks.append(source.mid(start, cut - start));
+        start = cut;
+    }
+
+    return chunks;
+}
 }
 
 TranslationWorker::TranslationWorker() : engine_(new LlamaEngine()) {}
@@ -102,27 +148,72 @@ void TranslationWorker::initializeModel() {
 }
 
 void TranslationWorker::translate(const QString &source, const QString &sourceLanguage,
-                                 const QString &targetLanguage) {
+                                 const QString &targetLanguage, int maxEndOfTurns,
+                                 bool includeExplanation) {
     cancelled_ = false;
     if (!modelLoaded_) {
         emit statusChanged("Error: model is not ready");
         return;
     }
     QString error;
-    emit statusChanged("Translating");
-    const auto completed = engine_->translate(
-        source, sourceLanguage, targetLanguage, glossary_,
-        [this](const QString &partial) {
-            if (!cancelled_) emit partialTranslation(partial);
-        },
-        &error);
-    if (completed) {
-        emit statusChanged("Completed");
-    } else if (cancelled_) {
-        emit statusChanged("Cancelled");
-    } else {
-        emit statusChanged("Error: " + error);
+    const auto chunks = splitTranslationInput(source);
+    QString completeTranslation;
+    QString completeExplanation;
+
+    for (qsizetype chunkIndex = 0; chunkIndex < chunks.size() && !cancelled_; ++chunkIndex) {
+        emit statusChanged(QString("Translating part %1/%2")
+                               .arg(chunkIndex + 1)
+                               .arg(chunks.size()));
+        QString chunkOutput;
+        const auto completed = engine_->translate(
+            chunks.at(chunkIndex), sourceLanguage, targetLanguage, glossary_, maxEndOfTurns,
+            includeExplanation,
+            [this, &chunkOutput, &completeTranslation, includeExplanation](const QString &partial) {
+                chunkOutput = partial;
+                if (!cancelled_ && !includeExplanation) {
+                    emit partialTranslation(completeTranslation + chunkOutput);
+                }
+            },
+            &error);
+        if (!completed) {
+            if (cancelled_) {
+                emit statusChanged("Cancelled");
+            } else {
+                emit statusChanged("Error: " + error);
+            }
+            return;
+        }
+
+        if (includeExplanation) {
+            const auto marker = chunkOutput.indexOf("EXPLANATION:");
+            if (marker >= 0) {
+                const auto translation = chunkOutput.left(marker).trimmed();
+                const auto explanation = chunkOutput.mid(marker + 13).trimmed();
+                completeTranslation += translation;
+                completeExplanation += explanation;
+            } else {
+                completeTranslation += chunkOutput;
+                completeExplanation += "The model did not provide an explanation.";
+            }
+        } else {
+            completeTranslation += chunkOutput;
+        }
+
+        if (chunkIndex + 1 < chunks.size()) {
+            completeTranslation += '\n';
+            if (includeExplanation) completeExplanation += "\n --- \n";
+        }
     }
+
+    if (cancelled_) {
+        emit statusChanged("Cancelled");
+        return;
+    }
+    emit partialTranslation(completeTranslation);
+    if (includeExplanation) {
+        emit explanationReady(completeExplanation);
+    }
+    emit statusChanged("Completed");
 }
 
 void TranslationWorker::cancel() {
