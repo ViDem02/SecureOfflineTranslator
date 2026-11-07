@@ -20,8 +20,6 @@ That matters when you're working with engineering reports, internal specificatio
 
 **The goal is to make accidental uploads and straightforward network-based data exfiltration substantially harder**, while keeping translation as simple as using any other desktop app.
 
-> **A meaningful barrier, not a security certification.** The indicator verifies active sandbox and file-access entitlements; it does not independently prove that every possible exfiltration path is closed. Signed-build validation and adversarial network testing remain essential before using the app with highly sensitive data.
-
 ## Why I built it
 
 Online translators are convenient — until the text is an internal report, a technical drawing's notes, or an engineering specification that should stay within your organization.
