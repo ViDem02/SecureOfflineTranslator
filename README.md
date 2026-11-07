@@ -1,214 +1,127 @@
-# Secure Translator
+# Secure Offline Translator
 
-Native macOS application for offline technical translation.
+### Built to translate. Not to transmit.
 
-## Current stack
+AI-powered technical translation, right on your Mac — with **no cloud inference and no network access granted to the sandboxed app**.
 
-- C++20
-- Qt 6 Widgets
-- CMake + Ninja
-- `llama.cpp` vendored under `third_party/llama.cpp`
-- Apple Silicon / Metal target
-- no HTTP server, Docker, Ollama, telemetry, or runtime downloads
+For documents that need to cross a language barrier, **not a network**.
 
-## Recreating the repository
+![Secure Offline Translator translating an engineering document from English to French, with its sandbox status visible](Screenshot.png)
 
-The repository intentionally does not contain the large GGUF model. The
-directory structure is preserved by `model/.gitkeep`; copy exactly one local
-`.gguf` file there before configuring CMake:
+## More than an offline promise
 
-```sh
-cp /path/to/translategemma-4b-it.Q4_K_M.gguf model/
-```
+Many apps are called *offline* because they don't normally contact a server. Secure Offline Translator goes a step further: **its macOS App Sandbox is configured without permission to initiate network connections.**
 
-`llama.cpp` is pinned to commit
-`9e99f65173e88dcdaab24011ab820c131ec4abfe`. If `third_party/llama.cpp` is
-not present after cloning the repository, recreate it with:
+That matters when you're working with engineering reports, internal specifications, or other material you would not want a translation tool to upload silently.
 
-```sh
-sh scripts/fetch-llama.sh
-```
+- **The operating system enforces the boundary.** The app is sandboxed without the outgoing or incoming network entitlements (`network.client` / `network.server`). Ordinary attempts by the sandboxed process to establish network connections are therefore restricted by macOS — not merely discouraged by application logic.
+- **There's no cloud path to fall back to.** Inference runs in-process using `llama.cpp`, with no remote translation API, account, telemetry, HTTP server, or runtime model download.
+- **Security has a visible status.** The interface reports whether its required App Sandbox entitlements are active. If that startup check fails, translation is disabled instead of continuing unprotected.
 
-The script downloads only the pinned build dependency into
-`third_party/llama.cpp`; the application itself performs no downloads or
-network access. If the vendored directory is already present, do not run the
-script again: it refuses to overwrite existing files.
+**The goal is to make accidental uploads and straightforward network-based data exfiltration substantially harder**, while keeping translation as simple as using any other desktop app.
 
-Install the build tools and Qt locally, then configure and build:
+> **A meaningful barrier, not a security certification.** The indicator verifies active sandbox and file-access entitlements; it does not independently prove that every possible exfiltration path is closed. Signed-build validation and adversarial network testing remain essential before using the app with highly sensitive data.
 
-```sh
+## Why I built it
+
+Online translators are convenient — until the text is an internal report, a technical drawing's notes, or an engineering specification that should stay within your organization.
+
+I wanted to explore whether modern AI translation could offer the same familiar desktop experience **without requiring users to trust an external service with their input**.
+
+The result is a native macOS prototype that combines local language-model inference, a deliberately restricted network capability, and a clear, usable interface.
+
+## Designed for everyday use
+
+| Feature | Why it matters |
+| --- | --- |
+| **Side-by-side translation** | Review source and translated text in the same window. |
+| **Fully local AI inference** | Text is processed on your Mac, not submitted to a cloud model. |
+| **Sandbox status indicator** | See the result of the application's sandbox startup check. |
+| **Technical glossary** | Guide translations toward consistent domain-specific terminology. |
+| **Optional explanations** | Request context separately from the translated result. |
+| **Open, copy & save** | Work with `.txt` files and export translations without an online account. |
+| **Memory indicator** | Monitor available memory while using an on-device model. |
+
+## What happens when you translate?
+
+**Your text → on-device language model → translated text**
+
+The model runs inside the native application, accelerated by Apple Metal. A dedicated background worker keeps the interface responsive; longer inputs are translated in smaller segments, and the loaded model is reused across requests.
+
+The model is also checked against an approved **SHA-256 fingerprint** before loading, so a different or modified GGUF cannot be accepted silently.
+
+<details>
+<summary><strong>Under the hood — for the technically curious</strong></summary>
+
+<br>
+
+| Layer | Implementation |
+| --- | --- |
+| Desktop UI | C++20 · Qt 6 Widgets |
+| Model inference | `llama.cpp` · Apple Metal |
+| Reference model | TranslateGemma 4B (GGUF, Q4_K_M) |
+| Network isolation | macOS App Sandbox, without client/server network entitlements |
+| Runtime safeguard | Sandbox entitlement check; translation disabled on failure |
+| Model integrity | Approved filename + SHA-256 verification |
+| Hardening checks | Static checks for entitlements, selected network/process APIs, and bundle signature |
+| Build | CMake · Ninja |
+
+The application does not depend on Ollama, Docker, or an external inference server. The GGUF model is not committed to this repository. Using another approved model, such as TranslateGemma 12B, requires a matching model manifest and a rebuild; it is not presented here as the default configuration.
+
+These controls reduce risk but do not make the app immune to all software vulnerabilities, indirect data-transfer mechanisms, or compromised dependencies. The source checks do not substitute for dynamic security testing.
+
+</details>
+
+## Build it yourself
+
+**Status:** Working, developer-oriented prototype for macOS on Apple Silicon, not a notarized consumer release.
+
+You'll need Homebrew, a compatible approved GGUF model, and a matching independently verified SHA-256 entry in the model manifest.
+
+```bash
+# Clone the source
+git clone https://github.com/ViDem02/SecureOfflineTranslator.git
+cd SecureOfflineTranslator
+
+# Install build dependencies
 brew install cmake ninja qtbase
+
+# Fetch the pinned llama.cpp dependency
+sh scripts/fetch-llama.sh
+
+# Add your approved GGUF model before configuring
+cp /path/to/translategemma-4b-it.Q4_K_M.gguf model/
+
+# Build and launch
 cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/homebrew
 cmake --build build
 open build/SecureTranslator.app
 ```
 
-Run the security-focused checks with:
+The dependency fetch occurs **during setup**. The translator itself is designed for offline runtime use and does not download a model or call a translation service.
 
-```sh
+Run the included checks:
+
+```bash
 ctest --test-dir build --output-on-failure
 ```
 
-The suite verifies model hash acceptance/rejection, manifest filename
-validation, App Sandbox and no-network entitlements, absence of application
-process-spawning/network APIs, bundle signature validity, and GPU-offload
-configuration. Runtime Metal stress testing and Apple notarization still
-require a release machine and credentials; they are not replaced by static
-checks.
+To inspect the application's signed entitlements on macOS:
 
-## VS Code development
-
-Install the recommended extensions:
-
-- CMake Tools
-- C/C++ (Microsoft)
-
-The project is configured for Homebrew Qt under `/opt/homebrew`. Configure and
-build from the repository root:
-
-```sh
-cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/homebrew
-cmake --build build
-```
-
-The application bundle is:
-
-```text
-build/SecureTranslator.app
-```
-
-The build compiles vendored `llama.cpp` statically with Metal enabled. It does
-not use the Homebrew `libllama` at runtime.
-
-The macOS build also runs `macdeployqt`, copying the required Qt frameworks and
-platform plugins (including `cocoa`) into the application bundle. The resulting
-`.app` can therefore be launched without setting `QT_PLUGIN_PATH` or relying on
-the system Qt installation.
-
-On macOS development builds are ad-hoc signed with
-`entitlements/SecureTranslator.entitlements`. Verify the result with:
-
-```sh
+```bash
 codesign --verify --deep --strict build/SecureTranslator.app
 codesign -d --entitlements :- build/SecureTranslator.app
 ```
 
-At startup, the application also checks the active process entitlements
-(`com.apple.security.app-sandbox` and
-`com.apple.security.files.user-selected.read-write`). If either entitlement
-is missing, translation initialization is blocked and the interface reports
-that security verification failed.
+For development and security details, see the [project requirements](Secure_Offline_Translator_Requisiti.md), [sandbox entitlements](entitlements/SecureTranslator.entitlements), and [hardening checks](tests/hardening_checks.cmake).
 
-Ad-hoc signing is not notarization. A release build requires an organization
-Developer ID certificate and a separate notarization procedure.
+## Security and quality, without shortcuts
 
-For a signed release, pass the organization certificate identity:
+The aim is **privacy-conscious, controllable translation**, not an unqualified promise of zero leakage. An active sandbox, limited entitlements, model verification, and static checks provide concrete defenses — but do not prove that every indirect route out of a device is impossible.
 
-```sh
-cmake -S . -B build -G Ninja \
-  -DCMAKE_PREFIX_PATH=/opt/homebrew \
-  -DSECURE_TRANSLATOR_SIGNING_IDENTITY="Developer ID Application: Organization"
-```
+Independent verification of signed builds, negative network tests, dependency review, and translation-quality evaluation are ongoing. Human review remains necessary for safety-critical, legal, or otherwise consequential translations.
 
-In VS Code, use `Cmd+Shift+B` to run the default build task or select
-**Debug SecureTranslator** from the Run and Debug panel.
+---
 
-## Model integration status
-
-The application skeleton, Qt GUI, file access, SHA-256 verifier, and worker
-thread boundary are present. The local `llama.cpp` model uses full Metal
-offload (`n_gpu_layers = -1`) for Apple Silicon. The context is configured up
-to 8192 tokens, subject to the model's training limit. Prompt and
-generated-token batches use explicit positions, sequence IDs, and logits.
-
-Place exactly one GGUF model in the project `model/` folder:
-
-```sh
-cp /path/to/translategemma-4b-it.Q4_K_M.gguf model/
-cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/homebrew
-cmake --build build
-```
-
-The build requires exactly one `.gguf` file in `model/`. That file is copied
-into `SecureTranslator.app/Contents/Resources` and loaded from inside the
-signed application bundle. To use another model, replace the file in `model/`
-and rebuild the app. The application does not accept a second model path at
-runtime.
-
-The interface also provides a `max end_of_turn` setting from 1 to 8. The
-decoder stops after reaching that many end-of-turn markers; the default is 1.
-
-Enable **Explain** to ask Gemma for a separate explanation. The explanation is
-displayed in its own panel and is not included in the saved translation.
-
-Long input is translated incrementally. The worker splits it into bounded
-chunks, preferring paragraph, line, sentence, and word boundaries, then
-translates and recombines the chunks in order. All chunks in one request share
-the same llama.cpp context, so terminology and preceding translation decisions
-remain available to later chunks. The context memory is cleared when the
-request completes or is cancelled. The finite context window still imposes a
-maximum amount of cross-part history per request; the application rejects an
-unsafe overflow instead of decoding past the limit.
-
-At startup the application verifies the bundled model hash and loads the GGUF
-once on the worker thread. Translations reuse that loaded model; verification
-and loading are not repeated for each translation.
-
-An optional glossary can be placed in `glossary/`. The folder may contain at
-most one `.yaml` file, which is loaded once at startup and bundled with the
-application:
-
-```yaml
-terms:
-  - source: "torque"
-    target: "coppia"
-  - source: "firmware"
-    target: "firmware"
-```
-
-Replace the glossary file and rebuild to change it. The glossary is supplied
-to the local model as translation instructions and is not sent anywhere.
-No model is downloaded automatically, and the source GGUF is not modified.
-
-The approved manifest is also embedded in the application bundle. If
-`SECURE_TRANSLATOR_MANIFEST` is not set, the application uses that embedded
-copy, which works correctly under App Sandbox.
-
-The manifest must contain the exact file name and a SHA-256 obtained from an
-independent, trusted source:
-
-```json
-{
-  "models": [
-    {
-      "file": "translategemma-4b-it.Q4_K_M.gguf",
-      "sha256": "trusted-lowercase-sha256"
-    }
-  ]
-}
-```
-
-`models/approved-models.example.json` is only a schema example. Its placeholder
-hash is intentionally rejected. The application rejects missing files,
-unknown file names, and every hash that is not present in the manifest.
-The configured model is TranslateGemma 4B Q4_K_M. Replacing it with another
-model requires a separately approved manifest entry and a rebuild.
-
-The current manifest authorizes the configured TranslateGemma 4B file with
-SHA-256
-`81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ade55790b683a08330`.
-The hash was verified locally before loading. The model file itself is not
-stored in this repository.
-
-The interface displays the host's currently available memory and refreshes it
-every two seconds. This is a local diagnostic only: CPU and GPU saturation are
-not yet reported, and no resource data leaves the application.
-
-Text files are read and written as UTF-8. Prompt and generated text are
-decoded cumulatively so multibyte characters, accented characters, CJK text,
-and emoji are not split between model tokens. The model's own tokenizer still
-determines translation quality for each language.
-
-This project is not a security certification. The signed App Sandbox bundle,
-entitlements, model provenance, and negative security tests must be validated
-before processing confidential data.
+**Built by [Victor Gabriele De Matteis](https://github.com/ViDem02)**  
+Exploring practical AI, native software, and trustworthy engineering.
